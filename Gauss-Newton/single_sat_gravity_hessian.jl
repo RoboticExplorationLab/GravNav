@@ -49,10 +49,8 @@ function measurement(x,t)
     r1 = x[1:3]*dscale
 
     _M_fx(r) = accel_perturbations(epc+t*tscale,r)
-    # @infiltrate
-    # error()
 
-    # throw in dscale just to get it working
+    # throw in dscale just to scale it nicely
     H = FD.jacobian(_M_fx,r1)*dscale
     return SVector(H[1,1],H[1,2],H[2,2],H[1,3],H[2,3],H[3,3])
 end
@@ -60,21 +58,11 @@ function dynamics(x,u,t)
     """ODE for orbital motion"""
     r1 = x[1:3]*dscale
     v1 = x[4:6]*(dscale/tscale)
-    # r2 = x[7:9]*dscale
-    # v2 = x[10:12]*(dscale/tscale)
-    # r3 = x[13:15]*dscale
-    # v3 = x[16:18]*(dscale/tscale)
 
     # this is my debugging stuff for if one of them hits the earth
     if norm(r1)<R_EARTH
         error("Impact 1")
     end
-    # if norm(r2)<R_EARTH
-    #     error("Impact 2")
-    # end
-    # if norm(r3)<R_EARTH
-    #     error("Impact 3")
-    # end
 
     # the current time is (epc + t*dscale)
     return [v1 / (dscale/tscale);
@@ -267,79 +255,23 @@ end
 # true x
 x_real = vec(mat_from_vec(X))
 
-# add noise with 500 meter σ to true solution
-x_guess = x_real + .005*randn(length(x_real))
+# add noise with 50km meter σ to true solution
+x_guess = x_real + (50000/dscale)*randn(length(x_real))
 x_gn = gauss_newton(x_guess)
 
 
 X_gn = reshape(x_gn,6,:)
-#
-# # this is our estimated state in the vector of vectors format
 μs = vec_from_mat(X_gn)
-#
 position_error = zeros(length(X))
 for i = 1:length(X)
     position_error[i] = norm(X[i][1:3] - μs[i][1:3])
-    # position_error[2,i] = norm(X[i][7:9] - μs[i][7:9])
-    # position_error[3,i] = norm(X[i][13:15] - μs[i][13:15])
 end
 
 mat"
 figure
 hold on
+title('Position Error')
+ylabel('Error (meters)')
 plot($position_error*$dscale)
 hold off
 "
-#
-# dt *= tscale
-# t_vec = 0:dt:dt*(length(X)-1)
-# t_vec /= 3600
-# mat"
-# figure
-# hold on
-# title('Relative Position Errors')
-# plot($t_vec,$position_error(2:3,:)'*$dscale)
-# legend('Target 1','Target 2')
-# xlabel('Time (hours)')
-# ylabel('Error (meters)')
-# hold off
-# saveas(gcf,'relerror_gn.png')
-# "
-#
-# # now get the relative distances in the chief RTN frame
-# r1 = [X[i][1:3]*dscale for i = 1:length(X)]
-# r2 = [X[i][7:9]*dscale for i = 1:length(X)]
-# r3 = [X[i][13:15]*dscale for i = 1:length(X)]
-#
-# v1 = [X[i][4:6]*(dscale/tscale) for i = 1:length(X)]
-# v2 = [X[i][10:12]*(dscale/tscale) for i = 1:length(X)]
-# v3 = [X[i][15:18]*(dscale/tscale) for i = 1:length(X)]
-#
-# rp1 = fill(zeros(3),length(X))
-# rp2 = fill(zeros(3),length(X))
-#
-# for i = 1:length(X)
-#     ECI_Q_RTNchief = rRTNtoECI([r1[i];v1[i]])
-#
-#     rp1[i] = ECI_Q_RTNchief'*(r2[i]-r1[i])
-#     rp2[i] = ECI_Q_RTNchief'*(r3[i]-r1[i])
-# end
-#
-# rp1 = mat_from_vec(rp1)/1000
-# rp2 = mat_from_vec(rp2)/1000
-#
-#
-# mat"
-# figure
-# hold on
-# title('Relative Position from Chief')
-# plot3($rp1(1,:),$rp1(2,:),$rp1(3,:))
-# plot3($rp2(1,:),$rp2(2,:),$rp2(3,:))
-# legend('Target 1','Target 2')
-# xlabel('Chief R (km)')
-# ylabel('Chief T (km)')
-# zlabel('Chief N (km)')
-# view([23,39])
-# hold off
-# saveas(gcf,'relp_gn.png')
-# "
