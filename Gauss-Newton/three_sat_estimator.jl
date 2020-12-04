@@ -179,12 +179,12 @@ x0 = [eci0;eci1;eci2]
 X,Y = generate_data(x0,T,dt,R)
 
 # new Q and R for gauss-newton stuff
-Q = (1e-2)*.001*Diagonal(@SVector ones(nx))
+Q = (1e-2)*.00000001*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
-R= (1e-2)*.1*Diagonal(@SVector ones(m))
-cholR = sqrt(R)
-invcholR = inv(cholR)
+# R= (1e-2)*.1*Diagonal(@SVector ones(m))
+# cholR = sqrt(R)
+# invcholR = inv(cholR)
 
 # indexing for x and y within the residual vector
 idx_x = [(t-1)*nx .+ (1:nx) for t = 1:T]
@@ -244,8 +244,8 @@ function gauss_newton(x0)
     Ds = 0.0
     v = zeros(length(x))
 
-    # run Gauss-Newton for 30 iterations max
-    for i = 1:30
+    # run Gauss-Newton for 100 iterations max
+    for i = 1:10
 
         # ∂r/∂x
         sparse_jacobian!(J,x)
@@ -259,7 +259,7 @@ function gauss_newton(x0)
 
         # calculate current cost
         S_k = dot(r,r)
-        @show S_k
+        # @show S_k
 
         # step size (learning rate)
         α = 1.0
@@ -273,20 +273,31 @@ function gauss_newton(x0)
             if S_new < S_k
                 x = copy(x_new)
                 Ds = S_k - S_new
-                @show ii
+                # @show ii
                 break
             else
                 α /= 2
             end
             if ii == 20
-                error("line search failed")
+                @warn "line search failed"
+                Ds = 0
+
             end
         end
 
         # depending on problems caling, termination criteria should be updated
-        if Ds < 1e-8
+        if Ds < 1e-4
             break
         end
+
+        # ----------------------------output stuff-----------------------------
+        if rem((i-1),4)==0
+            println("iter      α           S          dS")
+        end
+        J_display = round(S_k,sigdigits = 3)
+        dJ_display = round(Ds,sigdigits = 3)
+        alpha_display = round(α,sigdigits = 3)
+        println("$i         $alpha_display      $J_display    $dJ_display")
 
     end
     return x
@@ -296,7 +307,7 @@ end
 x_real = vec(mat_from_vec(X))
 
 # add noise with 500 meter σ to true solution
-x_guess = x_real + .0005*randn(length(x_real))
+x_guess = x_real + (500/dscale)*randn(length(x_real))
 x_gn = gauss_newton(x_guess)
 X_gn = reshape(x_gn,18,:)
 
