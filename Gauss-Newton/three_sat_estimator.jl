@@ -179,7 +179,7 @@ x0 = [eci0;eci1;eci2]
 X,Y = generate_data(x0,T,dt,R)
 
 # new Q and R for gauss-newton stuff
-Q = (1e-2)*.00000000001*Diagonal(@SVector ones(nx))
+Q = (1e-2)*.00000000000001*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
 # R= (1e-2)*.1*Diagonal(@SVector ones(m))
