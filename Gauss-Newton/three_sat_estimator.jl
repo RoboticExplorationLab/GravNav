@@ -1,3 +1,10 @@
+# get the virtual environment all set up
+using Pkg
+cd(@__DIR__)
+Pkg.activate(".")
+Pkg.instantiate()
+
+
 using LinearAlgebra, MATLAB, ForwardDiff, Attitude, StaticArrays
 using SparseArrays, IterativeSolvers, Infiltrator
 const FD = ForwardDiff
@@ -107,7 +114,7 @@ function rk4(f, u, x_n, h,t_n)
 
 end
 
-function generate_data(x0,T,dt,Q,R)
+function generate_data(x0,T,dt,R)
     """Forward rollout of the sim, no process noise"""
 
     X = fill(zeros(nx),T)
@@ -169,10 +176,10 @@ eci2[4:6] /= (dscale/tscale)
 x0 = [eci0;eci1;eci2]
 
 # run sim
-X,Y = generate_data(x0,T,dt,Q,R)
+X,Y = generate_data(x0,T,dt,R)
 
 # new Q and R for gauss-newton stuff
-Q = (1e-2)*1*Diagonal(@SVector ones(nx))
+Q = (1e-2)*.001*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
 R= (1e-2)*.1*Diagonal(@SVector ones(m))
@@ -247,8 +254,8 @@ function gauss_newton(x0)
         r = residual(x)
 
         # solve for Gauss-Newton step (direct, or indirect)
-        # v = -J\r
-        lsqr!(v,-J,r)
+        v = -J\r
+        # lsqr!(v,-J,r)
 
         # calculate current cost
         S_k = dot(r,r)
