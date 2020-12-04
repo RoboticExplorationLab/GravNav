@@ -178,13 +178,11 @@ x0 = [eci0;eci1;eci2]
 # run sim
 X,Y = generate_data(x0,T,dt,R)
 
-# new Q and R for gauss-newton stuff
+# new Q for gauss-newton stuff
 Q = (1e-2)*.00000000000001*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
-# R= (1e-2)*.1*Diagonal(@SVector ones(m))
-# cholR = sqrt(R)
-# invcholR = inv(cholR)
+
 
 # indexing for x and y within the residual vector
 idx_x = [(t-1)*nx .+ (1:nx) for t = 1:T]
