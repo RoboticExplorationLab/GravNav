@@ -67,9 +67,15 @@ function measurement(x)
 
     r3 = SVector(x[13],x[14],x[15])
 
+    # current measurement of 1sat + relnavs
     return SVector(r1[1],r1[2],r1[3],v1[1],v1[2],v1[3],norm(r1-r2),
                    norm(r1-r3),
                    norm(r2-r3))
+
+    #TODO: make the measurement the following"
+    # Y = relnav1, relnav2, relnav3, nu1, nu2, nu3
+    # where nu is from
+    # nu = eclipse_conical(x, r_sun)
 end
 function dynamics(x,u,t)
     """ODE for orbital motion"""
@@ -147,6 +153,8 @@ chief_vσ = 0.01/(dscale/tscale)
 
 # .5 m σ for relative ranging sensor noise
 rel_range_σ = 0.5/dscale
+
+# chol = sqrt (sorry)
 R = Diagonal([chief_rσ*ones(3);chief_vσ*ones(3);rel_range_σ*ones(3)].^2)
 cholR = sqrt(R)
 invcholR = inv(cholR)
@@ -196,7 +204,7 @@ function residual(x)
         xt = @view x[idx_x[i]]
         xtp1 = @view x[idx_x[i+1]]
         t = (i-1)*dt
-        # dynamics residual
+        # dynamics residual (huge weight on this because dynamics are good)
         r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, dt,t))
     end
     for i = 1:T
@@ -210,6 +218,7 @@ end
 
 function sparse_jacobian!(J,x)
     """Modify sparse jacobian in place"""
+    #NOTE: this is just a fancy version of FD.jacobian(residual,x)
     u = 0.0
     for i = 1:T
         if i < T
@@ -247,6 +256,8 @@ function gauss_newton(x0)
 
         # ∂r/∂x
         sparse_jacobian!(J,x)
+        # this is the same as:
+        # J = FD.jacobian(residual,x)
 
         # calculate residual at x
         r = residual(x)
@@ -284,7 +295,7 @@ function gauss_newton(x0)
         end
 
         # depending on problems caling, termination criteria should be updated
-        if Ds < 1e-4
+        if Ds < 1e-8
             break
         end
 
@@ -292,10 +303,10 @@ function gauss_newton(x0)
         if rem((i-1),4)==0
             println("iter      α           S          dS")
         end
-        J_display = round(S_k,sigdigits = 3)
-        dJ_display = round(Ds,sigdigits = 3)
+        S_display = round(S_k,sigdigits = 3)
+        dS_display = round(Ds,sigdigits = 3)
         alpha_display = round(α,sigdigits = 3)
-        println("$i         $alpha_display      $J_display    $dJ_display")
+        println("$i         $alpha_display      $S_display    $dS_display")
 
     end
     return x
@@ -305,7 +316,7 @@ end
 x_real = vec(mat_from_vec(X))
 
 # add noise with 500 meter σ to true solution
-x_guess = x_real + (500/dscale)*randn(length(x_real))
+x_guess = x_real + (5000/dscale)*randn(length(x_real))
 x_gn = gauss_newton(x_guess)
 X_gn = reshape(x_gn,18,:)
 
