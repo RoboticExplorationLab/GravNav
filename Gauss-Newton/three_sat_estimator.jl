@@ -1,8 +1,8 @@
 # get the virtual environment all set up
-using Pkg
-cd(@__DIR__)
-Pkg.activate(".")
-Pkg.instantiate()
+# using Pkg
+# cd(@__DIR__)
+# Pkg.activate(".")
+# Pkg.instantiate()
 
 
 using LinearAlgebra, MATLAB, ForwardDiff, Attitude, StaticArrays
@@ -187,7 +187,7 @@ x0 = [eci0;eci1;eci2]
 X,Y = generate_data(x0,T,dt,R)
 
 # new Q for gauss-newton stuff
-Q = (1e-2)*.00000000000001*Diagonal(@SVector ones(nx))
+Q = (1e-24)*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
 
@@ -295,7 +295,7 @@ function gauss_newton(x0)
         end
 
         # depending on problems caling, termination criteria should be updated
-        if Ds < 1e-8
+        if Ds < 1e-5
             break
         end
 
@@ -306,7 +306,7 @@ function gauss_newton(x0)
         S_display = round(S_k,sigdigits = 3)
         dS_display = round(Ds,sigdigits = 3)
         alpha_display = round(α,sigdigits = 3)
-        println("$i         $alpha_display      $S_display    $dS_display")
+        println("$i         $alpha_display   $S_display    $dS_display")
 
     end
     return x
@@ -342,7 +342,7 @@ legend('Target 1','Target 2')
 xlabel('Time (hours)')
 ylabel('Error (meters)')
 hold off
-saveas(gcf,'relerror_gn.png')
+%saveas(gcf,'relerror_gn.png')
 "
 
 # now get the relative distances in the chief RTN frame
@@ -380,5 +380,5 @@ ylabel('Chief T (km)')
 zlabel('Chief N (km)')
 view([23,39])
 hold off
-saveas(gcf,'relp_gn.png')
+%saveas(gcf,'relp_gn.png')
 "
