@@ -56,21 +56,38 @@ function accel_perturbations(epc::Epoch, x::Array{<:Real} ;
 
     return a
 end
-function measurement(x)
+function measurement(x,t)
     """Measurement function for our system. Fill ranging for the first sat
     and relative positions between all 3"""
 
     r1 = SVector(x[1],x[2],x[3])
     v1 = SVector(x[4],x[5],x[6])
-
     r2 = SVector(x[7],x[8],x[9])
-
     r3 = SVector(x[13],x[14],x[15])
 
+    # the current time is (epc + t*dscale)
+    t_current = epc+t*tscale
+
+    # sun position
+    r_sun  = sun_position(t_current)
+
     # current measurement of 1sat + relnavs
-    return SVector(r1[1],r1[2],r1[3],v1[1],v1[2],v1[3],norm(r1-r2),
+    # return SVector(r1[1],r1[2],r1[3],v1[1],v1[2],v1[3],norm(r1-r2),
+    #                norm(r1-r3),
+    #                norm(r2-r3))
+    b1 = norm(IGRF13(r1*dscale,t_current))
+    b2 = norm(IGRF13(r1*dscale,t_current))
+    b3 = norm(IGRF13(r1*dscale,t_current))
+
+    return SVector(eclipse_conical(x[1:3]*dscale, r_sun),
+                   eclipse_conical(x[7:9]*dscale, r_sun),
+                   eclipse_conical(x[13:15]*dscale, r_sun),
+                   norm(r1-r2),
                    norm(r1-r3),
-                   norm(r2-r3))
+                   norm(r2-r3),
+                   b1,
+                   b2,
+                   b3)
 
     #TODO: make the measurement the following"
     # Y = relnav1, relnav2, relnav3, nu1, nu2, nu3
@@ -135,9 +152,9 @@ function generate_data(x0,T,dt,R)
     for i = 1:(T-1)
         t = (i-1)*dt
         X[i+1] = rk4(dynamics,u,X[i],dt,t) #+ sqrt(Q)*randn(nx)
-        Y[i] = measurement(X[i]) + sqrt(R)*randn(m)
+        Y[i] = measurement(X[i],t) + sqrt(R)*randn(m)
     end
-    Y[T] = measurement(X[T]) +  sqrt(R)*randn(m)
+    Y[T] = measurement(X[T],(T-1)*dt) +  sqrt(R)*randn(m)
 
     return X,Y
 end
@@ -146,6 +163,7 @@ end
 # problem size
 nx = 18
 nu = 1
+# m = 9
 m = 9
 
 # 10 cm σ for chief position sensor noise
@@ -156,8 +174,12 @@ chief_vσ = 0.01/(dscale/tscale)
 # .5 m σ for relative ranging sensor noise
 rel_range_σ = 0.5/dscale
 
+#
+nu_σ = 1e-8
 # chol = sqrt (sorry)
-R = Diagonal([chief_rσ*ones(3);chief_vσ*ones(3);rel_range_σ*ones(3)].^2)
+# R = Diagonal([chief_rσ*ones(3);chief_vσ*ones(3);rel_range_σ*ones(3)].^2)
+# R = Diagonal((rel_range_σ*ones(3)).^2)
+R = Diagonal([nu_σ*ones(3);rel_range_σ*ones(3);nu_σ*ones(3)].^2)
 cholR = sqrt(R)
 invcholR = inv(cholR)
 
@@ -173,8 +195,8 @@ epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0)
 # Declare initial state in terms of osculating orbital elements
 oe0  = [R_EARTH + 550e3, 0.01, 45.0, 12, 25, 0]
 eci0 = sOSCtoCART(oe0, use_degrees=true)
-eci1 = eci0 + [10*normalize(randn(3));.1*normalize(randn(3))]
-eci2 = eci0 + [10*normalize(randn(3));.1*normalize(randn(3))]
+eci1 = eci0 + [100*normalize(randn(3));.1*normalize(randn(3))]
+eci2 = eci0 + [100*normalize(randn(3));.1*normalize(randn(3))]
 
 #scale everything
 eci0[1:3] /= dscale
@@ -212,7 +234,8 @@ function residual(x)
     for i = 1:T
         xt = @view x[idx_x[i]]
         # sensor residual
-        r[idx_y[i]] = invcholR*(Y[i] - measurement(xt))
+        t = (i-1)*dt
+        r[idx_y[i]] = invcholR*(Y[i] - measurement(xt,t))
     end
 
     return r
@@ -230,11 +253,14 @@ function sparse_jacobian!(J,x)
             A_fx(x) = rk4(dynamics, u, x, dt,t)
             J[k,k] = -invcholQ*FD.jacobian(A_fx,xt)
             J[k,k .+ nx] = invcholQ
-            J[idx_y[i],k] = -invcholR*FD.jacobian(measurement,xt)
+            _C_fx(x) = measurement(x,t)
+            J[idx_y[i],k] = -invcholR*FD.jacobian(_C_fx,xt)
         else
             k = idx_x[i]
             xt = @view x[k]
-            J[idx_y[i],k] = -invcholR*FD.jacobian(measurement,xt)
+            t = (i-1)*dt
+            __C_fx(x) = measurement(x,t)
+            J[idx_y[i],k] = -invcholR*FD.jacobian(__C_fx,xt)
         end
     end
     return nothing
