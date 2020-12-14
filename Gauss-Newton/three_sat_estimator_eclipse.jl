@@ -75,9 +75,9 @@ function measurement(x,t)
     # return SVector(r1[1],r1[2],r1[3],v1[1],v1[2],v1[3],norm(r1-r2),
     #                norm(r1-r3),
     #                norm(r2-r3))
-    b1 = norm(IGRF13(r1*dscale,t_current))
-    b2 = norm(IGRF13(r1*dscale,t_current))
-    b3 = norm(IGRF13(r1*dscale,t_current))
+    b1 = norm(1e6*IGRF13(r1*dscale,t_current))
+    b2 = norm(1e6*IGRF13(r1*dscale,t_current))
+    b3 = norm(1e6*IGRF13(r1*dscale,t_current))
 
     return SVector(eclipse_conical(x[1:3]*dscale, r_sun),
                    eclipse_conical(x[7:9]*dscale, r_sun),
@@ -211,7 +211,7 @@ x0 = [eci0;eci1;eci2]
 X,Y = generate_data(x0,T,dt,R)
 
 # new Q for gauss-newton stuff
-Q = (1e-24)*Diagonal(@SVector ones(nx))
+Q = (1e-28)*Diagonal(@SVector ones(nx))
 cholQ = sqrt(Q)
 invcholQ = inv(cholQ)
 
@@ -344,7 +344,7 @@ end
 x_real = vec(mat_from_vec(X))
 
 # add noise with 500 meter σ to true solution
-x_guess = x_real + (5000/dscale)*randn(length(x_real))
+x_guess = x_real + (.5/dscale)*randn(length(x_real))
 x_gn = gauss_newton(x_guess)
 X_gn = reshape(x_gn,18,:)
 
