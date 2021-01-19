@@ -14,7 +14,7 @@ using SatelliteDynamics
 
 # distance and time scaling
 dscale = 1e3
-tscale = 1  # leave at 1 for now
+tscale = 1      # leave at 1 for now
 numMinutes = 5  # Number of minutes to propagate data (this many before AND after)
 
 ##### DATA GENERATION #####
@@ -108,7 +108,7 @@ function rk4(f, u, x_n, h,t_n)
     return (x_n + (1/6)*(k1+2*k2+2*k3 + k4))
 end
 
-function generate_data(x0, dt)
+function generate_data(x0)
     """ Generates data for a specified amount of minutes before and after the satellite is directly overhead.
         No process noise is added. No measurement noise is added.
         Takes in an initial state and timestep.
@@ -125,17 +125,15 @@ function generate_data(x0, dt)
     X[:,midPoint] = x0
     
     # Go backward from midpoint
-    dt = -dt # Convert to negative so we move backwards
     for i = midPoint:-1:2
         t = tHist[i] # This '-1' and the corresponding '+1' in forward may be unnecessary 
-        X[:,i-1] = rk4(dynamics, u, X[:,i], dt, t)
+        X[:,i-1] = rk4(dynamics, u, X[:,i], -dt, t)
         Y[:,i] = measurement(X[:,i], (epc+(t*tscale)))
     end
     t = tHist[1]
     Y[:,1] = measurement(X[:,1], (epc+(t*tscale)))
     
     # Go forward from midpoint
-    dt = -dt # Flip back to positive time
     for i = midPoint:(T-1) 
         t = tHist[i]
         X[:, i+1] = rk4(dynamics, u, X[:,i], dt, t)
@@ -165,9 +163,9 @@ gascola_ecef = ECEF(gascola_lla, wgs84)
 gs3_ecef = Array(gascola_ecef) ./ dscale
 
 ## Initial Conditions (polar orbit passing directly over GS at t = 0)
-μ = (3.9860044188)*(10^(14))    # m^3 / s^2
-μ = (μ * (tscale^2))/(dscale^3) # Convert to appropriate units
-Re = 6371000 / dscale           # Radius of Earth, in appropriate units
+μ  = (3.9860044188)*(10^(14))     # m^3 / s^2
+μ  = (μ * (tscale^2))/(dscale^3)  # Convert to appropriate units
+Re = 6371000 / dscale             # Radius of Earth, in appropriate units
 r0 = Re + (550000 / dscale)
 r0 = r0*(gs1_ecef/norm(gs1_ecef))   # Initial radius of orbit (directly above GS1)
 v0 = cross(r0, cross(r0,[0;0;1]))
@@ -183,14 +181,15 @@ m =  3  # Size of measurement vector
 global dt = 0.1 / tscale
 
 # run sim
-x, y, tHist = generate_data(x0, dt);
+x, y, tHist = generate_data(x0);
 T = length(tHist)
 println("----------Finished Generating Data----------")
+
 
 ##### GAUSS NEWTON SOLVER #####
 # Add measurement noise 
 y = reshape(y, length(y), 1)
-yhat = y + 50 * randn(size(y)) / dscale  # Noisy measurements (50 m)
+yhat = y + 5 * randn(size(y)) / dscale  # Noisy measurements (50 m)
 
 # Set initial guess for Gauss-Newton
 xhat = zeros(size(x))
@@ -200,9 +199,9 @@ x = reshape(x, length(x), 1)
 xhat = reshape(xhat, length(xhat), 1) 
 
 # Noise parameters (Set fairly arbitrarily)
-posNoise_σ = (1e-3) / dscale  
-velNoise_σ = (1e-5) * (tscale/dscale)
-measurementNoise_σ = (240) / dscale # not sure where 240 comes from, but it was in Dr Manchester's code 
+posNoise_σ = (1e-6) / dscale # (1e-3) / dscale  
+velNoise_σ = (1e-8) / (dscale/tscale) # (1e-5) * (tscale/dscale)
+measurementNoise_σ = (50) / dscale # not sure where 240 comes from, but it was in Dr Manchester's code 
 
 Q = Diagonal([posNoise_σ*ones(3); velNoise_σ*ones(3)] .^ 2)
 cholQ = sqrt(Q)
@@ -216,31 +215,40 @@ invcholR = inv(cholR)
 idx_x = [(t-1)*nx .+ (1:nx) for t = 1:T]
 idx_y = [(T-1)*nx + (t-1)*m .+ (1:m) for t = 1:T]
 
+
 function residual(x)
     """residual vector for Gauss-Newton. rᵀr = MAP cost function"""
 
-    u = SVector(0,0,0)
+    u = 0.0 #SVector(0,0,0)
     r = zeros(eltype(x),nx*(T-1) + m*(T))
     midPoint = convert(Int, ceil(T/2))
     
+    # NOTE - At this point, I could probably just use the forward propatation from the start point...
     ## States
+    """
     # Backward
-    global dt = -dt 
     for i = midPoint:-1:2 
         xt = @view x[idx_x[i]]
         xtp1 = @view x[idx_x[i-1]]
         t = tHist[i] 
-        r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, dt,t))
+        r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, -dt,t))
     end
     
     # Forward
-    global dt = -dt 
     for i = midPoint:(T-1)
         xt = @view x[idx_x[i]]
         xtp1 = @view x[idx_x[i+1]]
         t = tHist[i] 
         r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, dt,t))
     end
+    """
+    for i = 1:(T-1)
+        xt = @view x[idx_x[i]]
+        xtp1 = @view x[idx_x[i+1]]
+        t = tHist[i]
+        r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, dt,t))
+    end
+    
     
     ## Measurements
     for i = 1:T
@@ -248,7 +256,7 @@ function residual(x)
         xt = @view x[idx_x[i]]
         # sensor residual
         t = tHist[i] 
-        r[idx_y[i]] = invcholR*(y[(3*(i-1)+1):(3*i)] - measurement(xt, epc + t * tscale))
+        r[idx_y[i]] = invcholR*(yhat[(3*(i-1)+1):(3*i)] - measurement(xt, epc + t * tscale))
     end
     
     return r
@@ -262,7 +270,7 @@ function sparse_jacobian!(J,x)
         if i < T
             k = idx_x[i]
             xt = @view x[k]
-            t = (i-1)*dt
+            t = tHist[i]
             A_fx(x) = rk4(dynamics, u, x, dt,t)
             J[k,k] = -invcholQ*FD.jacobian(A_fx,xt)
             J[k,k .+ nx] = invcholQ
@@ -271,7 +279,7 @@ function sparse_jacobian!(J,x)
         else
             k = idx_x[i]
             xt = @view x[k]
-            t = (i-1)*dt
+            t = tHist[i]
             _measurement_closure(x) = measurement(x, epc + t*tscale)
             J[idx_y[i],k] = -invcholR*FD.jacobian(_measurement_closure, xt)
         end
@@ -292,7 +300,7 @@ function gauss_newton(x0)
     v = zeros(length(x))
 
     # run Gauss-Newton for 100 iterations max
-    for i = 1:30
+    for i = 1:25
 
         # ∂r/∂x
         sparse_jacobian!(J,x)
@@ -356,8 +364,6 @@ end
 x_gn = gauss_newton(xhat);
 println("----------Finished Gauss Newton----------")
 
-
-
 ##### PLOTTING #####
 x_gn = reshape(x_gn, nx, :)
 xhat = reshape(xhat, nx, :)
@@ -369,33 +375,35 @@ initError = zeros(size(x))
 finalError = zeros(size(x))
 
 for i = 1:T 
-    initError[:,i] = abs.(x[:,i] - xhat[:,i])
+    initError[:,i]  = abs.(x[:,i] - xhat[:,i])
     finalError[:,i] = abs.(x[:,i] - x_gn[:,i])
 end
 
-# #Compare initial estimate and final estimate errors 
-# plt = plot( tHist, initError[1,:], label = "Ex0",linestyle = :dash)
-# plt = plot!(tHist, initError[2,:], label = "Ey0",linestyle = :dash)
-# plt = plot!(tHist, initError[3,:], label = "Ez0",linestyle = :dash)
+#Compare initial estimate and final estimate errors 
+# initErr = plot( tHist, initError[1,:], label = false,linestyle = :dash)
+# initErr = plot!(tHist, initError[2,:], label = false,linestyle = :dash)
+# initErr = plot!(tHist, initError[3,:], label = false,linestyle = :dash)
 
 # Final Error
-err = plot( tHist, finalError[1,:], label = "Exf", title = "Error")
-err = plot!(tHist, finalError[2,:], label = "Eyf", xguidefontsize = 8, yguidefontsize = 8)
-err = plot!(tHist, finalError[3,:], label = "Ezf", xlabel = "time\n($tscale s)", ylabel = "Error\n($dscale m)")
+err = plot(tHist, finalError[1,:], label = "x", title = "Error")
+err = plot!(tHist, finalError[2,:], label = "y", xguidefontsize = 8, yguidefontsize = 8)
+err = plot!(tHist, finalError[3,:], label = "z", xlabel = "time\n($tscale s)", ylabel = "Error\n($dscale m)")
 
-# Satellite Position (actual and estimate)
-pos = plot( tHist, x_gn[1,:], label = "̂x")
-pos = plot!(tHist, x_gn[2,:], label = "̂y")
-pos = plot!(tHist, x_gn[3,:], label = "̂z")
-pos = plot!(tHist, x[1,:], label = false, linestyle = :dash, title = "Satellite Position")
-pos = plot!(tHist, x[2,:], label = false, linestyle = :dash, xlabel = "time\n($tscale s)", ylabel = "Position\n($dscale m)")
-pos = plot!(tHist, x[3,:], label = false, linestyle = :dash, xguidefontsize = 8, yguidefontsize = 8)
+# # Satellite Position (actual and estimate)
+# pos = plot( tHist, x_gn[1,:], label = "̂x")
+# pos = plot!(tHist, x_gn[2,:], label = "̂y")
+# pos = plot!(tHist, x_gn[3,:], label = "̂z")
+# pos = plot!(tHist, x[1,:], label = false, linestyle = :dash, title = "Satellite Position")
+# pos = plot!(tHist, x[2,:], label = false, linestyle = :dash, xlabel = "time\n($tscale s)", ylabel = "Position\n($dscale m)")
+# pos = plot!(tHist, x[3,:], label = false, linestyle = :dash, xguidefontsize = 8, yguidefontsize = 8)
 
 # Measurements
-meas= plot( tHist, y[1,:], label = "r2-r1", title = "Measurements")
-meas= plot!(tHist, y[2,:], label = "r3-r1", xlabel = "time\n($tscale s)", ylabel = "Relative Distance\n($dscale m)")
-meas= plot!(tHist, y[3,:], label = "r3-r2", xguidefontsize = 8, yguidefontsize = 8)
+meas= plot( tHist, yhat[1,:], label = "r2-r1", title = "Measurements")
+meas= plot!(tHist, yhat[2,:], label = "r3-r1", xlabel = "time\n($tscale s)", ylabel = "Relative Distance\n($dscale m)")
+meas= plot!(tHist, yhat[3,:], label = "r3-r2", xguidefontsize = 8, yguidefontsize = 8)
+meas= plot!(tHist, y[1,:], label = false, linestyle = :dash)
+meas= plot!(tHist, y[2,:], label = false, linestyle = :dash)
+meas= plot!(tHist, y[3,:], label = false, linestyle = :dash)
 
-display(plot(pos, meas, err, layout = (3,1)))
-
+display(plot(meas, err, layout = (2,1)))
 
