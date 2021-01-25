@@ -5,17 +5,20 @@ cd(@__DIR__)
 Pkg.activate(".")
 Pkg.instantiate()
 
-
 using LinearAlgebra, ForwardDiff, Attitude, StaticArrays
 using SparseArrays, IterativeSolvers, Infiltrator
 const FD = ForwardDiff
 using Geodesy, Optim, DifferentialEquations, Statistics
 using SatelliteDynamics
 
+
+using Random
+# Random.seed!(645)
+
 # distance and time scaling
-dscale = 1e3
-tscale = 1      # leave at 1 for now
-numMinutes = 5  # Number of minutes to propagate data (this many before AND after)
+dscale = 1e6
+tscale = 3600/5
+numMinutes = 5 # Number of minutes to propagate data (this many before AND after)
 
 ##### DATA GENERATION #####
 function accel_perturbations(epc::Epoch, x::Array{<:Real} ;
@@ -65,14 +68,14 @@ function measurement(x, epc)
     """ Measurement function for our system. 
          Consists of differences between the distances from the satellite to each of three groundstations."""
 
-    gs1_eci = sECEFtoECI(epc, dscale * gs1_ecef) 
-    gs2_eci = sECEFtoECI(epc, dscale * gs2_ecef)
-    gs3_eci = sECEFtoECI(epc, dscale * gs3_ecef)
+    gs1_eci = sECEFtoECI(epc, dscale * gs1_ecef / tscale) 
+    gs2_eci = sECEFtoECI(epc, dscale * gs2_ecef / tscale)
+    gs3_eci = sECEFtoECI(epc, dscale * gs3_ecef / tscale)
 
     # Get distances from each groundstation to satellite
-    r1 = norm(x[1:3]-(gs1_eci / dscale))
-    r2 = norm(x[1:3]-(gs2_eci / dscale))
-    r3 = norm(x[1:3]-(gs3_eci / dscale))
+    r1 = norm(x[1:3]-(gs1_eci / (dscale/tscale)))
+    r2 = norm(x[1:3]-(gs2_eci / (dscale/tscale)))
+    r3 = norm(x[1:3]-(gs3_eci / (dscale/tscale)))
 
 
     # Return difference of distances
@@ -115,7 +118,7 @@ function generate_data(x0)
         Returns a vector of times, along with associated states and measurements.
     """
 
-    tHist = Array(range(-numMinutes * 60.0, numMinutes * 60.0, step = dt)) # 5 minutes before -> 5 minutes after 
+    tHist = Array(range(-(numMinutes * 60.0 / tscale), (numMinutes * 60.0 / tscale), step = dt)) # numMinutes before -> numMinutes after
     T = length(tHist)
     midPoint = convert(Int, ceil(T/2))
     
@@ -126,21 +129,21 @@ function generate_data(x0)
     
     # Go backward from midpoint
     for i = midPoint:-1:2
-        t = tHist[i] # This '-1' and the corresponding '+1' in forward may be unnecessary 
+        t = tHist[i] 
         X[:,i-1] = rk4(dynamics, u, X[:,i], -dt, t)
-        Y[:,i] = measurement(X[:,i], (epc+(t*tscale)))
+        Y[:,i] = measurement(X[:,i], (epc+(t*tscale))) + (randn(3) * 240.0  / dscale)
     end
     t = tHist[1]
-    Y[:,1] = measurement(X[:,1], (epc+(t*tscale)))
+    Y[:,1] = measurement(X[:,1], (epc+(t*tscale))) + (randn(3) * 240.0  / dscale)
     
     # Go forward from midpoint
     for i = midPoint:(T-1) 
         t = tHist[i]
         X[:, i+1] = rk4(dynamics, u, X[:,i], dt, t)
-        Y[:,i] = measurement(X[:,i], (epc+(t*tscale)))
+        Y[:,i] = measurement(X[:,i], (epc+(t*tscale))) + (randn(3) * 240.0  / dscale)
     end
     t = tHist[T]
-    Y[:,T] = measurement(X[:,T], (epc+(t*tscale)))
+    Y[:,T] = measurement(X[:,T], (epc+(t*tscale))) + (randn(3) * 240.0  / dscale)
     
     return X, Y, tHist
 end
@@ -153,9 +156,14 @@ weanHall_ecef = ECEF(weanHall_lla, wgs84)         # Wean Hall, Earth-Centered Ea
 gs1_ecef = Array(weanHall_ecef) ./ dscale 
 
 # Groundstation 2: National Robotics Engineering Center 
-nrec_lla = LLA(40.4712452, -79.9661841, 16.6)
-nrec_ecef = ECEF(nrec_lla, wgs84)
-gs2_ecef = Array(nrec_ecef) ./ dscale
+# nrec_lla = LLA(40.4712452, -79.9661841, 16.6)
+# nrec_ecef = ECEF(nrec_lla, wgs84)
+# gs2_ecef = Array(nrec_ecef) ./ dscale
+
+hartwood_lla = LLA(40.558423, -79.883541, 378.0) # Hartwood Acres Park
+hartwood_ecef = ECEF(hartwood_lla, wgs84)
+gs2_ecef = Array(hartwood_ecef) ./ dscale
+
 
 # Groundstation 3: Gascola
 gascola_lla = LLA(40.4652298, -79.7889967, 268.0)
@@ -166,42 +174,39 @@ gs3_ecef = Array(gascola_ecef) ./ dscale
 μ  = (3.9860044188)*(10^(14))     # m^3 / s^2
 μ  = (μ * (tscale^2))/(dscale^3)  # Convert to appropriate units
 Re = 6371000 / dscale             # Radius of Earth, in appropriate units
-r0 = Re + (550000 / dscale)
+r0 = Re + (550000 / dscale) #+ (100000*randn()/dscale)
 r0 = r0*(gs1_ecef/norm(gs1_ecef))   # Initial radius of orbit (directly above GS1)
 v0 = cross(r0, cross(r0,[0;0;1]))
-v0 = (sqrt(μ/norm(r0))*v0/norm(v0))        * tscale # Initial velocity (magnitude of velocity * unit vector in appropriate direction)
+v0 = (sqrt(μ/norm(r0))*v0/norm(v0)) # Initial velocity (magnitude of velocity * unit vector in appropriate direction)
 x0 = [r0; v0];  # Initial state of satellite, adjusted units 
 
 epc = Epoch(2020, 3, 15, 12, 0, 0, 0.0) # Initial time for sim. Chosen arbitrarily 
+dt = 0.1 / tscale
 
-# problem size
 nx = 6  # Size of x vector
 m =  3  # Size of measurement vector
 
-global dt = 0.1 / tscale
 
 # run sim
-x, y, tHist = generate_data(x0);
+x, yhat, tHist = generate_data(x0);
 T = length(tHist)
 println("----------Finished Generating Data----------")
 
 
 ##### GAUSS NEWTON SOLVER #####
-# Add measurement noise 
-y = reshape(y, length(y), 1)
-yhat = y + 5 * randn(size(y)) / dscale  # Noisy measurements (50 m)
-
 # Set initial guess for Gauss-Newton
 xhat = zeros(size(x))
-xhat[1:3, :] = x[1:3,:] + 10 * randn(3, size(x)[2]) / dscale          # Position 
-xhat[4:6, :] = x[4:6,:] + 10 * randn(3, size(x)[2]) / (dscale/tscale) # Velocity 
+xhat[1:3, :] = x[1:3,:] + 100000 * randn(3, size(x)[2]) / dscale          # Position 
+xhat[4:6, :] = x[4:6,:] + 100 * randn(3, size(x)[2]) / (dscale/tscale)    # Velocity 
+
 x = reshape(x, length(x), 1)
 xhat = reshape(xhat, length(xhat), 1) 
+yhat = reshape(yhat, length(yhat), 1)
 
 # Noise parameters (Set fairly arbitrarily)
-posNoise_σ = (1e-6) / dscale # (1e-3) / dscale  
-velNoise_σ = (1e-8) / (dscale/tscale) # (1e-5) * (tscale/dscale)
-measurementNoise_σ = (50) / dscale # not sure where 240 comes from, but it was in Dr Manchester's code 
+posNoise_σ = (1e-3) / dscale # 1e-3 (adjusted) m   (Comes from drag force)
+velNoise_σ = (1e-5) / (dscale/tscale) # 1e-5 (adjusted) m/s
+measurementNoise_σ = (240) / dscale # This number was selected after some monte carlo testing was performed by Dr. Manchester
 
 Q = Diagonal([posNoise_σ*ones(3); velNoise_σ*ones(3)] .^ 2)
 cholQ = sqrt(Q)
@@ -225,23 +230,6 @@ function residual(x)
     
     # NOTE - At this point, I could probably just use the forward propatation from the start point...
     ## States
-    """
-    # Backward
-    for i = midPoint:-1:2 
-        xt = @view x[idx_x[i]]
-        xtp1 = @view x[idx_x[i-1]]
-        t = tHist[i] 
-        r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, -dt,t))
-    end
-    
-    # Forward
-    for i = midPoint:(T-1)
-        xt = @view x[idx_x[i]]
-        xtp1 = @view x[idx_x[i+1]]
-        t = tHist[i] 
-        r[idx_x[i]] = invcholQ*(xtp1 - rk4(dynamics, u, xt, dt,t))
-    end
-    """
     for i = 1:(T-1)
         xt = @view x[idx_x[i]]
         xtp1 = @view x[idx_x[i+1]]
@@ -252,11 +240,9 @@ function residual(x)
     
     ## Measurements
     for i = 1:T
-        i = T
         xt = @view x[idx_x[i]]
-        # sensor residual
         t = tHist[i] 
-        r[idx_y[i]] = invcholR*(yhat[(3*(i-1)+1):(3*i)] - measurement(xt, epc + t * tscale))
+        r[idx_y[i]] = invcholR*(yhat[(3*(i-1)+1):(3*i)] - measurement(xt, epc + (t * tscale) ))
     end
     
     return r
@@ -274,13 +260,13 @@ function sparse_jacobian!(J,x)
             A_fx(x) = rk4(dynamics, u, x, dt,t)
             J[k,k] = -invcholQ*FD.jacobian(A_fx,xt)
             J[k,k .+ nx] = invcholQ
-            _measurementClosure(x) = measurement(x, epc + t*tscale)
+            _measurementClosure(x) = measurement(x, epc + (t*tscale) )
             J[idx_y[i],k] = -invcholR*FD.jacobian(_measurementClosure, xt)
         else
             k = idx_x[i]
             xt = @view x[k]
             t = tHist[i]
-            _measurement_closure(x) = measurement(x, epc + t*tscale)
+            _measurement_closure(x) = measurement(x, epc + (t*tscale) )
             J[idx_y[i],k] = -invcholR*FD.jacobian(_measurement_closure, xt)
         end
     end
@@ -324,7 +310,7 @@ function gauss_newton(x0)
         # run a simple line search
         for ii = 1:20
             x_new = x + α*v
-            S_new= norm(residual(x_new))^2
+            S_new = norm(residual(x_new))^2
 
             # this could be updated for strong frank-wolfe conditions
             if S_new < S_k
@@ -360,7 +346,6 @@ function gauss_newton(x0)
     return x
 end
 
-
 x_gn = gauss_newton(xhat);
 println("----------Finished Gauss Newton----------")
 
@@ -369,25 +354,26 @@ x_gn = reshape(x_gn, nx, :)
 xhat = reshape(xhat, nx, :)
 yhat = reshape(yhat, m, :)
 x = reshape(x, nx, :)
-y = reshape(y,m, :)
+yhat = reshape(yhat,m, :)
 
 initError = zeros(size(x))
 finalError = zeros(size(x))
 
 for i = 1:T 
-    initError[:,i]  = abs.(x[:,i] - xhat[:,i])
-    finalError[:,i] = abs.(x[:,i] - x_gn[:,i])
+    initError[:,i]  = abs.(x[:,i] - xhat[:,i]) * dscale
+    finalError[:,i] = abs.(x[:,i] - x_gn[:,i]) * dscale
 end
 
+tHist *= tscale
 #Compare initial estimate and final estimate errors 
-# initErr = plot( tHist, initError[1,:], label = false,linestyle = :dash)
-# initErr = plot!(tHist, initError[2,:], label = false,linestyle = :dash)
-# initErr = plot!(tHist, initError[3,:], label = false,linestyle = :dash)
+# err = plot( tHist, initError[1,:], label = false,linestyle = :dash)
+# err = plot!(tHist, initError[2,:], label = false,linestyle = :dash)
+# err = plot!(tHist, initError[3,:], label = false,linestyle = :dash)
 
 # Final Error
-err = plot(tHist, finalError[1,:], label = "x", title = "Error")
+err = plot( tHist, finalError[1,:], label = "x", title = "Error")
 err = plot!(tHist, finalError[2,:], label = "y", xguidefontsize = 8, yguidefontsize = 8)
-err = plot!(tHist, finalError[3,:], label = "z", xlabel = "time\n($tscale s)", ylabel = "Error\n($dscale m)")
+err = plot!(tHist, finalError[3,:], label = "z", xlabel = "time\n(s)", ylabel = "Error\n(m)")
 
 # # Satellite Position (actual and estimate)
 # pos = plot( tHist, x_gn[1,:], label = "̂x")
@@ -399,11 +385,12 @@ err = plot!(tHist, finalError[3,:], label = "z", xlabel = "time\n($tscale s)", y
 
 # Measurements
 meas= plot( tHist, yhat[1,:], label = "r2-r1", title = "Measurements")
-meas= plot!(tHist, yhat[2,:], label = "r3-r1", xlabel = "time\n($tscale s)", ylabel = "Relative Distance\n($dscale m)")
+meas= plot!(tHist, yhat[2,:], label = "r3-r1", xlabel = "time\n(s)", ylabel = "Relative Distance\n(m)")
 meas= plot!(tHist, yhat[3,:], label = "r3-r2", xguidefontsize = 8, yguidefontsize = 8)
-meas= plot!(tHist, y[1,:], label = false, linestyle = :dash)
-meas= plot!(tHist, y[2,:], label = false, linestyle = :dash)
-meas= plot!(tHist, y[3,:], label = false, linestyle = :dash)
+
 
 display(plot(meas, err, layout = (2,1)))
+
+
+
 
