@@ -81,9 +81,10 @@ function J2_accel(r_eci)
 
 end
 function dynamics(t,x,u)
-    r = SA[x[1],x[2],x[3]]
+    rv = [x[1],x[2],x[3],x[4],x[5],x[6]]
     # a = -GM_EARTH*r/(norm(r)^3)
-    a =J2_accel(r)
+    # a =J2_accel(r)
+    a = accel_perturbations(epc + t, rv)
     return SA[x[4],x[5],x[6],a[1],a[2],a[3]]
 end
 
@@ -112,7 +113,8 @@ function generate_measurements(dt,N,eci0,M,sensor_σ)
     X[1] = copy(eci0)
 
     for i = 1:N-1
-        X[i+1] = rk4_orbital(dynamics,0,X[i],0,dt)
+        t = (i-1)*dt
+        X[i+1] = rk4_orbital(dynamics,t,X[i],0,dt)
     end
 
     Xm = mat_from_vec(X)
@@ -141,7 +143,8 @@ function rollout_guess(x_gn)
     X = [@SVector zeros(6) for i = 1:N]
     X[1] = copy(x_gn)
     for i = 1:N-1
-        X[i+1] = rk4_orbital(dynamics,0,X[i],0,dt)
+        t = (i-1)*dt
+        X[i+1] = rk4_orbital(dynamics,t,X[i],0,dt)
     end
     X_r = [SA[X[i][1],X[i][2],X[i][3]] for i = 1:length(X)]
     ecef_hist_gn = [rECItoECEF(epc + (i-1)*dt)*X_r[i] for i = 1:N]
@@ -153,7 +156,8 @@ function rollout(eci_initial)
     X = [@SVector zeros(6) for i = 1:N]
     X[1] = copy(eci_initial)
     for i = 1:N-1
-        X[i+1] = rk4_orbital(dynamics,0,X[i],0,dt)
+        t = (i-1)*dt
+        X[i+1] = rk4_orbital(dynamics,t,X[i],0,dt)
     end
     X_r = [SA[X[i][1],X[i][2],X[i][3]] for i = 1:length(X)]
     eci_hist_cubic = CubicSplineInterpolation(t_hist,X_r)

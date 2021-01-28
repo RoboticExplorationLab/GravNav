@@ -42,7 +42,7 @@ epc = Epoch(2020, 3, 15, 12, 0, 0, 0.0) + 38000
 dt = 10 # seconds
 N = 40  # number of steps for simulation
 M = 4000  # number of measurements
-sensor_σ = 240 # meters
+sensor_σ = 240.0 # meters
 X,eci_hist,ecef_hist,Y,Y_ts, idx_r, t_hist = generate_measurements(dt,N,eci0,M,sensor_σ)
 
 # initial guess for Gauss-Newton
