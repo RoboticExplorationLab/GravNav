@@ -23,15 +23,19 @@ function GN(v0)
         S = dot(res,res)
         # @show S
 
+        # print initial cost
         if i == 1
             S_p = @sprintf "%.6E" S
             printstyled("Initial cost: $S_p\n",bold = true, color = :magenta)
         end
+
+        # jacobian
         J = FiniteDiff.finite_difference_jacobian(residual,v0)
         # newton_step = -J\res
         newton_step = -(J'*J + 1e-6*I)\(J'*res)
         α = 1.0
         dS = NaN
+        # backtracking line search
         for ii = 1:20
             new_v = v0 + α*newton_step
             new_res = residual(new_v)

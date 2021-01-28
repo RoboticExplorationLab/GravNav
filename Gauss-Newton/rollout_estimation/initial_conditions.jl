@@ -26,12 +26,7 @@ dscale = copy(R_EARTH)
 gs_lla = [[-79.9479335;40.4427217;17],   # Wean Hall
           [-79.883541;40.558423;378],    # Hartwood Acres Park
           [-79.7889967;40.4652298;268]]  # Gascola
-# # this Longitude (deg), Latitude (deg), Altitude (m)
-# gs_lla = [[-76.9479335;42.4427217;17],   # Wean Hall
-#           [-72.883541;44.558423;378],    # Hartwood Acres Park
-#           [-79.7889967;40.4652298;268]]  # Gascola
 gs_ecef = [SVector{3}(sGEODtoECEF(gs_lla[i],use_degrees = true)) for i = 1:3]
-
 
 # initial orbital conditions
 oe0  = [R_EARTH + 532e3, 0.001, 97.5, 78.7, 153.037, 32+210]
