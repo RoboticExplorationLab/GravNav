@@ -5,6 +5,8 @@ using FiniteDiff
 using Printf
 using Interpolations
 
+#TODO: Change around the dynamics such that the residual doesn't have access
+# to the full dynamics, only something like 4x4 gravity.
 
 # dynamics, measurement, rollout functions
 include(joinpath(dirname(@__FILE__),"dynamics.jl"))
