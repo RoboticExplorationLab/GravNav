@@ -60,6 +60,7 @@ function rk4_orbital(f::Function, t_n, x_n, u, h::Real)
 end
 
 function dynamics(t,x,u)
+    """Basic two-body motion"""
     r = SA[x[1],x[2],x[3]]
     a = -GM_EARTH*r/(norm(r)^3)
     return SA[x[4],x[5],x[6],a[1],a[2],a[3]]
