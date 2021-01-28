@@ -144,7 +144,7 @@ function GN(v0)
 # v0 = v1 + 100*randn(3)
 
 new_S = 1e15
-for i = 1:5
+for i = 1:10
 
     res = residual(v0)
     S = dot(res,res)
@@ -152,6 +152,8 @@ for i = 1:5
 
     J = FiniteDiff.finite_difference_jacobian(residual,v0)
     newton_step = -J\res
+    @infiltrate
+    error()
     α = 1.0
     for i = 1:10
         new_v = v0 + α*newton_step
@@ -176,8 +178,11 @@ end
 end
 
 
-GN(eci0+ 100*randn(6))
+GN(eci0+ [100000*randn(3);100*randn(3)])
 
+#TODO tomorrow or tonight:
+# add random timing for the measurements and make sure it still converges on
+# the correct orbit
 
 
 
