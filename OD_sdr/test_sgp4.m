@@ -19,12 +19,12 @@ end
 %%
 
 jd_init = 2.4592512800462963e6;
-jd_final = jd_init + 20;
-N = 10000;
+jd_final = jd_init + 95/1440;
+N = 100;
 traj.ECI = cell(Nsats,1);
 traj.ECEF = cell(Nsats,1);
 traj.JD = cell(Nsats,1);
-for i = 1:1
+for i = 1:Nsats
     [traj.ECI{i},traj.JD{i}] = prop_orbit(TLEs.sats{i}(1),TLEs.sats{i}(2),jd_init,jd_final,N);
 end
 
@@ -40,9 +40,9 @@ warp(R_EARTH*x,R_EARTH*y,R_EARTH*z,circshift(rot90(imgRGB,2),569,2))
 %plot3($gs1(1),$gs1(2),$gs1(3),'g.','MarkerSize',20)
 %plot3($gsr(1),$gsr(2),$gsr(3),'b.','MarkerSize',20)
 % plot3(eci_hist(1,:),eci_hist(2,:),eci_hist(3,:),'r','linewidth',2)
-for i = 1:1
+for i = 1:Nsats
     eci_hist = traj.ECI{i};
-    plot3(eci_hist(1,:),eci_hist(2,:),eci_hist(3,:),'r','linewidth',2)
+    plot3(eci_hist(1,:),eci_hist(2,:),eci_hist(3,:))
 end
 % plot3($ecef_hist(1,:),eci_hist(2,:),eci_hist(3,:),'r','linewidth',2)
 view(150,34)
@@ -54,25 +54,42 @@ hold off
 
 
 function ecef_hist = getecefhist(eci_hist,jd_hist)
+
+    % get ecef history from eci history and JD history
     ecef_hist = zeros(3,size(eci_hist,2));
     for i = 1:length(jd_hist)
         ecef_hist(:,i) = getecef(eci_hist(1:3,i),jd_hist(i));
     end
+    
 end
 
 function r_ecef =  getecef(r_eci,jd)
+
+    % convert r_eci to r_ecef given a specified JD 
     r_ecef = dcmeci2ecef('IAU-2000/2006',datevec(datetime(jd,'convertfrom','juliandate')))*r_eci;
+    
 end
 
 function [eci_hist, jd_vec] = prop_orbit(tle_line1,tle_line2,jd_init,jd_final,N)
+
+    % convert tle strings to character arrays 
     tle_line1 = convertStringsToChars(tle_line1);
     tle_line2 = convertStringsToChars(tle_line2);
+    
+    % initialize the satrec struct 
     [~, ~, ~, satrec] = twoline2rv(tle_line1,tle_line2,'c','m','a',84);
+    
+    % get JD of TLE 
     jd1 = satrec.jdsatepoch + satrec.jdsatepochf;
+    
+    % determine time vec (minutes) from given start and stop JD
     jd_vec = linspace(jd_init,jd_final,N);
     t_vec_mins = (jd_vec - jd1) * 1440;
+    
+    % call sgp4 for each time in this vector 
     eci_hist = zeros(6,N);
     for i = 1:N
     [satrec, eci_hist(1:3,i), eci_hist(4:6,i)] = sgp4(satrec, t_vec_mins(i));
     end
+    
 end
