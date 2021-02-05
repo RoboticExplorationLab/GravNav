@@ -4,14 +4,19 @@ clear
 % [data,Fs] = audioread('SDRSharp_20210204_232546Z_915675010Hz_IQ.wav');
 [data,Fs] = audioread('SDRSharp_20210204_232546Z_915675010Hz_IQ.wav');
 T = 1/Fs;             % Sampling period       
-L = 1500;             % Length of signal
-t = (0:L-1)*T;        % Time vector
-
+L = size(data,1);             % Length of signal
+% t = (0:L-1)*T;        % Time vector
+t = 0:T:(L-1)*T;
+ourmat = zeros(size(data,1),2);
+for i = 1:size(data,1)
+    ourmat(i,1) = t(i);
+    ourmat(i,2) = abs(data(i,1) + data(i,1)*(1i));
+end
 
 
 % sec1 = data[1:.1*Fs]
 
-spectrogram(data(1:Fs*10))
+% spectrogram(data(1:Fs*10))
 
 %%
 [y,fs] = audioread('SDRSharp_20210204_232546Z_915675010Hz_IQ.wav');
