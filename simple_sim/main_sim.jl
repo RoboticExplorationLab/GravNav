@@ -32,10 +32,7 @@ function sim_driver()
             relativity=false
     )
 
-    # Propagate the orbit
-    # t_hist, epc_hist, eci_hist = sim!(orb, epcf)
-
-    # post process the results of the sim
+    # simulate and process
     sim_data = postprocess_sim(sim!(orb, epcf)...)
 
     return sim_data
@@ -68,15 +65,15 @@ function postprocess_sim(t_hist, epc_hist, eci_hist)
 end
 
 struct sim_results
-    t_hist::Array{Float64,1}
-    epc_hist::Array{Epoch,1}
-    eci_hist::Array{Float64,2}
-    r_hist::Array{Array{Float64,1},1}
-    v_hist::Array{Array{Float64,1},1}
-    B_eci_T::Array{Array{Float64,1},1}
-    r_sun_eci::Array{Array{Float64,1},1}
-    ecef_hist::Array{Array{Float64,1},1}
-    lla_hist::Array{Array{Float64,1},1}
+    t_hist     ::Array{Float64,1}
+    epc_hist   ::Array{Epoch,1}
+    eci_hist   ::Array{Float64,2}
+    r_hist     ::Array{Array{Float64,1},1}
+    v_hist     ::Array{Array{Float64,1},1}
+    B_eci_T    ::Array{Array{Float64,1},1}
+    r_sun_eci  ::Array{Array{Float64,1},1}
+    ecef_hist  ::Array{Array{Float64,1},1}
+    lla_hist   ::Array{Array{Float64,1},1}
 end
 
 sd2 =  sim_driver()
