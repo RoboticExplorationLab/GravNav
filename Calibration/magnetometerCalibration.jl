@@ -16,7 +16,7 @@ include("mag_field.jl")
 
 
 using Random
-# Random.seed!(6345)
+# Random.seed!(23413)
 
 function accel_perturbations(epc::Epoch, x::Array{<:Real} ;
              mass::Real=1.0, area_drag::Real=0.01, coef_drag::Real=2.3,
@@ -67,36 +67,28 @@ function measurement(x,t)
     r = x[1:3]
     v = x[4:6]
 
-    # the current time is (epc + t*dscale)
     t_current = epc+t*tscale
 
-    # sun position
-    r_sun  = sun_position(t_current)
-
-    η = eclipse_conical(r*dscale, r_sun)
+    r_sun  = sun_position(t_current)      # sun position
+    η = eclipse_conical(r*dscale, r_sun)  
 
     currents = η * randn((numCurrents, 1))
-
     magFromCur = curCoef * currents;
 
     # Orthogonal components of the geomagnetic field
     bx, by, bz = (IGRF13(r*dscale,t_current)) 
 
     b_field = [bx; by; bz];
-    b_hat = (T_matrix*b_field) + bias + magFromCur;
+    b_field_hat = (T_matrix*b_field) + bias + magFromCur;
+         
+    bx_hat, by_hat, bz_hat = b_field_hat[1:3]; 
 
-    bx_hat = b_hat[1];
-    by_hat = b_hat[2];
-    bz_hat = b_hat[3];
-
-
-    # Teslas are kg per amp s^2, so we need to scale by tScale^2 ?
+    currents /= (tscale^2) # This is just to accommodate the next line
     temp = (tscale^2)*[bx_hat; by_hat; bz_hat; 
                         bx; by; bz;
-                        currents];  # Note that the current gets scaled, but then unscaled soon after...
+                        currents];  
 
-    return temp[:,1];
-                                
+    return temp[:,1];                     
 end
 
 function dynamics(x,u,t)
@@ -140,8 +132,8 @@ function generate_data(x0,T,dt,R)
 
     u = SVector(0,0,0)
     for i = 1:(T-1)
-        t = (i-1)*dt
-        X[i+1] = rk4(dynamics,u,X[i],dt,t) #+ sqrt(Q)*randn(nx)
+        t = (i-1)*dt 
+        X[i+1] = rk4(dynamics,u,X[i],dt,t)  #+ sqrt(Q)*randn(nx)
         Y[i] = measurement(X[i],t) + sqrt(R)*randn(m)
     end
     Y[T] = measurement(X[T],(T-1)*dt) +  sqrt(R)*randn(m)
@@ -164,46 +156,32 @@ function extractParameters(T)
 
 end
 
-function plotEarth()
-    Re = (6371000 / dscale)
-
-    phi = 0:pi/50:2*pi;
-    theta = 0:pi/100:pi
-    x = [cos(t)*sin(p) for t in theta, p in phi];
-    y = [sin(t)*sin(p) for t in theta, p in phi];
-    z = [cos(p) for t in theta, p in phi];
-
-    return Re*x, Re*y, Re*z
-
-end
-
-
 
 """   SIMULATION PARAMETERS   """
-T = 193 # number of knot points (~193 = 1 orbit)
+T = 100 # number of knot points (~100 = 1 orbit)
 
 dscale, tscale = (1e6), (3600/5)
-
 numCurrents = 5;
-
-nx = 6      # Size of state matrix [pos, vel]
+nx = 6                    # Size of state matrix [pos, vel]
 m  = 6 + numCurrents      # Size of measurement matrix [pred, meas, current meas] 
 
 dt = 60.0/tscale # sample time is 1 min
 
+
 """ Noise """
-prediction_noise =  0.001 * (tscale^2); # Noise for for B_truth (from model), Teslas (kg/ (amp s^2))  
-measurement_noise = 0.001 * (tscale^2); # Noise for  B_meas,  Teslas (kg/ (amp s^2)) 
-current_noise = 0.001;   # Noise for current magnitude vectors 
+prediction_noise =  0.0001 * (tscale^2); # Noise for for B_truth, Teslas (kg/ (amp s^2))  
+measurement_noise = 0.01 * (tscale^2); # Noise for  B_meas,  Teslas (kg/ (amp s^2)) 
+
+current_noise = 0.001;   # Noise for current magnitude vectors, Amps
 
 R = Diagonal([prediction_noise*ones(3); measurement_noise*ones(3); current_noise*ones(numCurrents)].^2)
 cholR = sqrt(R)
 invcholR = inv(cholR)
 
 """ Model Parameters """
-s_a, s_b, s_c = 1 .+ 0.25*randn(3)                  # Scale Factors 
-bias_x, bias_y, bias_z = 5.0 * randn(3);            # Bias (Teslas)
-ρ, ϕ, λ = 20.0*randn(3);                            # Non-orthogonality angles  (in DEGREES)
+s_a, s_b, s_c = 1 .+ 0.2*randn(3)                # Scale Factors 
+bias_x, bias_y, bias_z = 2.0 * randn(3);         # Bias (Teslas)
+ρ, ϕ, λ = 15.0*randn(3);                         # Non-orthogonality angles  (in DEGREES)
 ρ, ϕ, λ = deg2rad(ρ), deg2rad(ϕ), deg2rad(λ)
 
 
@@ -229,32 +207,37 @@ x0 = eci0
 # GENERATE DATA
 X,Y = generate_data(x0,T,dt,R);
 xVals = mat_from_vec(X)
-yVals = mat_from_vec(Y) / (tscale^2)
 
+yVals = mat_from_vec(Y)     # y_meas [3 x 1], y_pred [3 x 1], current measurements [numCurrents x 1]
+y_meas = yVals[1:3, :] / (tscale^2)
+y_pred = yVals[4:6, :] / (tscale^2)
+currMeas = yVals[7:end, :]
 
-# SOLVE FOR T, BIAS
+# SOLVE FOR T, BIAS, and CURRENT COEFFICIENTS
 d = 3
 I3 = Matrix(1I, d, d)
 
 
 # Clumsy method of allowing for variable number of current measurements
-currRow = yVals[7,1]*I3
+currRow = currMeas[1,1]*I3
 for j = 2:numCurrents
-    global currRow = [currRow yVals[6+j,1]*I3];
+    global currRow = [currRow currMeas[j,1]*I3];
 end
-A = [yVals[4,1]*I3 yVals[5,1]*I3 yVals[6,1]*I3 I3 currRow]
+
+# A = [y_pred, I, current measurements]
+A = [y_pred[1,1]*I3 y_pred[2,1]*I3 y_pred[3,1]*I3 I3 currRow]
 
 
 for i = 2:size(yVals)[2]
-    global currRow = yVals[7,i]*I3
+    global currRow = currMeas[1,i]*I3
     for j = 2:numCurrents
-        global currRow = [currRow yVals[6+j,i]*I3];
+        global currRow = [currRow currMeas[j,i]*I3];
     end
-    row = [yVals[4,i]*I3 yVals[5,i]*I3 yVals[6,i]*I3 I3 currRow] # yVals[7,i]*I3 yVals[8,i]*I3 yVals[9,i]*I3 yVals[10,i]*I3]
+    row = [y_pred[1,i]*I3 y_pred[2,i]*I3 y_pred[3,i]*I3 I3 currRow] 
     global A = [A; row]
 end
 
-y_meas = yVals[1:3, :];  
+
 y_meas = reshape(y_meas, length(y_meas));
 
 params = A \ y_meas;
@@ -268,8 +251,6 @@ a_hat, b_hat, c_hat, ρ_hat, ϕ_hat, λ_hat = extractParameters(T_hat)
 bx_hat, by_hat, bz_hat = bias_hat
 ϵ_a, ϵ_b, ϵ_c, ϵ_ρ, ϵ_ϕ, ϵ_λ, ϵ_bx, ϵ_by, ϵ_bz = 
             (s_a - a_hat), (s_b - b_hat), (s_c - c_hat), (ρ -ρ_hat), (ϕ - ϕ_hat), (λ - λ_hat), (bias_x - bx_hat), (bias_y - by_hat), (bias_z - bz_hat)
-
-
 
 
 
@@ -291,20 +272,4 @@ println("_____________________________________________________________")
 println("Total T Error:      \t\t\t", sum(abs.(T_matrix - T_hat)))
 println("Total Bias Error:   \t\t\t", sum(abs.(bias - bias_hat)))
 println("Total Current Coefficient Error: \t", sum(abs.(curCoef - curCoef_hat)))
-
-
-
-
-
-# Ex, Ey, Ez = plotEarth()
-
-# pygui(true)
-
-# plt = plot3D(xVals[1,:], xVals[2,:], xVals[3,:])
-# plt = surf(Ex, Ey, Ez) 
-# plt = surface(Ex[:], Ey[:], Ez[:], color = :black, legend = false)
-
-# plt = scatter3d!(xVals[1,:], xVals[2,:], xVals[3,:])
-# display(plt)
-
 
