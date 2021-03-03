@@ -178,6 +178,10 @@ R = Diagonal([prediction_noise*ones(3); measurement_noise*ones(3); current_noise
 cholR = sqrt(R)
 invcholR = inv(cholR)
 
+Q = (1)*Diagonal(@SVector ones(3))
+cholQ = sqrt(Q)
+invcholQ = inv(cholQ)
+
 """ Model Parameters """
 s_a, s_b, s_c = 1 .+ 0.2*randn(3)                # Scale Factors 
 bias_x, bias_y, bias_z = 3.0 * randn(3);         # Bias (Teslas)
@@ -189,7 +193,6 @@ T_matrix = [s_a 0 0; s_b*sin(ρ) s_b*cos(ρ) 0; s_c*sin(λ) s_c*sin(ϕ)*cos(λ) 
 bias = [bias_x; bias_y; bias_z]
 
 curCoef = 5*randn((3, numCurrents)) # Scales how each current affects each measurement axis 
-
 
 
 """ Initial Conditions """
@@ -212,6 +215,159 @@ yVals = mat_from_vec(Y)     # y_meas [3 x 1], y_pred [3 x 1], current measuremen
 y_meas = yVals[1:3, :] / (tscale^2)
 y_pred = yVals[4:6, :] / (tscale^2)
 currMeas = yVals[7:end, :]
+
+function f(bm, cm, p)
+    # Reshape p -> T, b, s 
+    T_hat = reshape(p[1:9], 3, 3)
+    bias_hat = p[10:12]
+    curCoef_hat = p[13:end]
+    curCoef_hat = reshape(curCoef_hat, size(curCoef))
+
+    # B_meas = TB + b + Sum(s*I_meas)
+    # -> B = T^-1(B_meas - b - sum)
+    magFromCur = curCoef_hat * cm;
+    B = (T_hat^(-1))*(bm - bias_hat - magFromCur)
+    return (B.^2)
+end
+
+function f2(be, cm, p)
+    # Reshape p -> T, b, s 
+    T_hat = reshape(p[1:9], 3, 3)
+    bias_hat = p[10:12]
+    curCoef_hat = p[13:end]
+    curCoef_hat = reshape(curCoef_hat, size(curCoef))
+
+    # B_meas = TB + b + Sum(s*I_meas)
+    # -> B = T^-1(B_meas - b - sum)
+    magFromCur = curCoef_hat * cm;
+    B = T_hat*be + bias_hat + magFromCur
+    return (B.^2)
+end
+
+function residual(x)
+    """ residual vector for Gauss-Newton. rᵀr = MAP cost function
+            Note that x = parameters 
+            Meas = [(B_meas, B_pred, Curr_meas) x T]
+            Loss Function: 
+               J = 0.5*(B^2 - f(B,I,x))^T(B^2 - f(B,I,x))
+    """
+    r = zeros(eltype(x), (T,3))
+    
+    for i = 1:T 
+        B_meas = y_meas[:,i]
+        B_exp = y_pred[:, i] 
+        curr_meas = currMeas[:, i]
+        J = 0.5 * ((B_exp .^2) - f(B_meas, curr_meas, x))
+        # J = 0.5 * ((B_meas .^ 2) - f2(B_exp, curr_meas, x))
+        r[i,:] = invcholQ * J
+    end
+
+    return reshape(r, length(r))
+end
+
+
+function sparse_jacobian!(J,x)
+    """Modify sparse jacobian in place"""
+    #NOTE: this is just a fancy version of FD.jacobian(residual,x)
+    u = 0.0
+    t = 0.0
+    _C_fx(x) = measurement(x,t)
+    for i = 1:T
+
+
+        if i < T
+            k = idx_x[i]
+            xt = @view x[k]
+            t = (i-1)*dt
+            A_fx(x) = rk4(dynamics, u, x, dt,t)
+            J[k,k] = -invcholQ*FD.jacobian(A_fx,xt)
+            J[k,k .+ nx] = invcholQ
+            J[idx_y[i],k] = -invcholR*FD.jacobian(_C_fx,xt)
+        else
+            k = idx_x[i]
+            xt = @view x[k]
+            t = (i-1)*dt
+            J[idx_y[i],k] = -invcholR*FD.jacobian(_C_fx,xt)
+        end
+    end
+    return nothing
+end
+
+
+function gauss_newton(x0)
+    """Gauss-Newton for batch estimation"""
+
+    # copy initial guess
+    x = copy(x0)
+
+    # create sparse jacobian
+    # J = spzeros(nx*(T-1) + m*(T),nx*T)
+
+    Ds = 0.0
+    v = zeros(length(x))
+
+    # run Gauss-Newton for 100 iterations max
+    for i = 1:50
+
+        # ∂r/∂x
+        # sparse_jacobian!(J,x)
+        # this is the same as:
+        # _C_fx(x) = residual(x, yVals)
+        J = FD.jacobian(residual,x)
+
+        # calculate residual at x
+        r = residual(x)
+
+        # solve for Gauss-Newton step (direct, or indirect)
+        v = -J\r
+        # lsqr!(v,-J,r)
+
+        # calculate current cost
+        S_k = dot(r,r)
+        # @show S_k
+
+        # step size (learning rate)
+        α = 1.0
+
+        # run a simple line search
+        for ii = 1:25
+            x_new = x + α*v
+            S_new= norm(residual(x_new))^2
+
+            # this could be updated for strong frank-wolfe conditions
+            if S_new < S_k
+                x = copy(x_new)
+                Ds = S_k - S_new
+                # @show ii
+                break
+            else
+                α /= 2
+            end
+            if ii == 20
+                @warn "line search failed"
+                Ds = 0
+
+            end
+        end
+
+        # depending on problems caling, termination criteria should be updated
+        if Ds < 1e-5
+            break
+        end
+
+        # ----------------------------output stuff-----------------------------
+        if rem((i-1),4)==0
+            println("iter      α           S          dS")
+        end
+        S_display = round(S_k,sigdigits = 3)
+        dS_display = round(Ds,sigdigits = 3)
+        alpha_display = round(α,sigdigits = 3)
+        println("$i         $alpha_display   $S_display    $dS_display")
+
+    end
+    return x
+end
+
 
 # SOLVE FOR T, BIAS, and CURRENT COEFFICIENTS
 d = 3
@@ -240,7 +396,12 @@ end
 
 y_meas_vec = reshape(y_meas, length(y_meas));
 
-params = A \ y_meas_vec;
+params_guess = A \ y_meas_vec;
+
+params = gauss_newton(params_guess)
+
+params = params_guess
+
 
 T_hat = reshape(params[1:9], 3, 3)
 bias_hat = params[10:12]
@@ -251,8 +412,6 @@ a_hat, b_hat, c_hat, ρ_hat, ϕ_hat, λ_hat = extractParameters(T_hat)
 bx_hat, by_hat, bz_hat = bias_hat
 ϵ_a, ϵ_b, ϵ_c, ϵ_ρ, ϵ_ϕ, ϵ_λ, ϵ_bx, ϵ_by, ϵ_bz = 
             (s_a - a_hat), (s_b - b_hat), (s_c - c_hat), (ρ -ρ_hat), (ϕ - ϕ_hat), (λ - λ_hat), (bias_x - bx_hat), (bias_y - by_hat), (bias_z - bz_hat)
-
-
 
 
 println("\n\n")
@@ -273,14 +432,3 @@ println("Total T Error:      \t\t\t", sum(abs.(T_matrix - T_hat)))
 println("Total Bias Error:   \t\t\t", sum(abs.(bias - bias_hat)))
 println("Total Current Coefficient Error: \t", sum(abs.(curCoef - curCoef_hat)))
 
-
-
-plt = plot( y_meas[1,:], color = :red, label = "Measured")
-plt = plot!(y_meas[2,:], color = :blue, label = false)
-plt = plot!(y_meas[3,:], color = :green, label = false)
-
-plt = plot!(y_pred[1,:], color = :red, linestyle = :dash, label = "Predicted")
-plt = plot!(y_pred[2,:], color = :blue, linestyle = :dash, label = false)
-plt = plot!(y_pred[3,:], color = :green, linestyle = :dash, label = false)
-
-display(plt)
