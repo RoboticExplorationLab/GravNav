@@ -83,14 +83,13 @@ struct sim_results
 end
 
 function create_interps(sim_results)
-
+    # create named tuple with interpolation objects
     t = sim_results.t_hist
     interp_t = 0:(t[2]-t[1]):t[end]
-    eci = LinearInterpolation(interp_t,sim_results.eci_hist)
-    B = LinearInterpolation(interp_t,sim_results.B_eci_T)
-    sun = LinearInterpolation(interp_t,sim_results.r_sun_eci)
+    eci  = LinearInterpolation(interp_t,sim_results.eci_hist)
+    B    = LinearInterpolation(interp_t,sim_results.B_eci_T)
+    sun  = LinearInterpolation(interp_t,sim_results.r_sun_eci)
     ecef = LinearInterpolation(interp_t,sim_results.ecef_hist)
-
     return interps = (eci = eci, B=B,sun = sun, ecef = ecef)
 
 end
