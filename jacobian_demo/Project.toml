@@ -1,0 +1,3 @@
+[deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+SatelliteDynamics = "0e7c1a32-1b9f-5532-88a4-e668712d6a4c"
