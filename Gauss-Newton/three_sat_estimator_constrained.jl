@@ -207,7 +207,7 @@ function generate_data(x0,T,dt,R)
     u = SVector(0,0,0)
     for i = 1:(T-1)
         t = (i-1)*dt
-        X[i+1] = rk4(dynamics,u,X[i],dt,t) #+ sqrt(Q)*randn(nx)
+        X[i+1] = rk4(dynamics,u,X[i],dt,t) + sqrt(Q)*randn(nx)
         Y[i] = measurement(X[i]) + sqrt(R)*randn(m)
     end
     Y[T] = measurement(X[T]) +  sqrt(R)*randn(m)
@@ -233,7 +233,9 @@ rel_range_σ = 0.5/dscale
 R = Diagonal([chief_rσ^2*ones(3)/3;chief_vσ^2*ones(3)/3;rel_range_σ^2*ones(3)])
 cholR = sqrt(R)
 invcholR = inv(cholR)
-
+Q = 1e-18*Diagonal(kron(ones(3),[1e-5;1e-1;1e-5;1;1;1]))
+cholQ = sqrt(Q)
+invcholQ = inv(cholQ)
 # sample time is 30 seconds
 dt = 30.0/tscale
 
@@ -263,9 +265,6 @@ X,Y = generate_data(x0,T,dt,R)
 @show "generated data"
 # new Q for gauss-newton stuff
 # Q = (1e-24)*Diagonal(@SVector ones(nx))
-Q = 1e-18*Diagonal(kron(ones(3),[1e-5;1e-1;1e-5;1;1;1]))
-cholQ = sqrt(Q)
-invcholQ = inv(cholQ)
 
 
 # indexing for x and y within the residual vector
@@ -313,7 +312,27 @@ function sparse_jacobian!(J,x)
     end
     return nothing
 end
-
+# function dynacon_jac!(J,x)
+#     """Modify sparse jacobian in place"""
+#     #NOTE: this is just a fancy version of FD.jacobian(residual,x)
+#     u = 0.0
+#     for i = 1:T
+#         if i < T
+#             k = idx_x[i]
+#             xt = @view x[k]
+#             t = (i-1)*dt
+#             A_fx(x) = rk4(dynamics, u, x, dt,t)
+#             J[k,k] = -invcholQ*FD.jacobian(A_fx,xt)
+#             J[k,k .+ nx] = invcholQ
+#             J[idx_y[i],k] = -invcholR*FD.jacobian(measurement,xt)
+#         else
+#             k = idx_x[i]
+#             xt = @view x[k]
+#             J[idx_y[i],k] = -invcholR*FD.jacobian(measurement,xt)
+#         end
+#     end
+#     return nothing
+# end
 
 function gauss_newton(x0)
     """Gauss-Newton for batch estimation"""
@@ -339,7 +358,10 @@ function gauss_newton(x0)
         r = residual(x)
 
         # solve for Gauss-Newton step (direct, or indirect)
-        v = -J\r
+        ρ = 1e-6
+        F = qr([J;ρ*I])
+        # v = -(J)\r
+        v = -(F\[r;zeros(length(x))])
         # lsqr!(v,-J,r)
 
         # calculate current cost
@@ -410,15 +432,17 @@ dt *= tscale
 t_vec = 0:dt:dt*(length(X)-1)
 t_vec /= 3600
 mat"
+addpath('/Users/kevintracy/devel/GravNav/matlab2tikz-master')
 figure
 hold on
 title('Relative Position Errors')
 plot($t_vec,$position_error(2:3,:)'*$dscale)
-legend('Target 1','Target 2')
+legend('c_1','c_2')
 xlabel('Time (hours)')
 ylabel('Error (meters)')
 hold off
 %saveas(gcf,'relerror_gn.png')
+matlab2tikz('rel_err.tikz')
 "
 
 # now get the relative distances in the chief RTN frame
@@ -447,40 +471,91 @@ rp2 = mat_from_vec(rp2)/1000
 mat"
 figure
 hold on
-title('Relative Position from Chief')
+grid on
+title('Relative Position from Target')
 plot3($rp1(1,:),$rp1(2,:),$rp1(3,:))
 plot3($rp2(1,:),$rp2(2,:),$rp2(3,:))
-legend('Target 1','Target 2')
-xlabel('Chief R (km)')
-ylabel('Chief T (km)')
-zlabel('Chief N (km)')
+legend('c_1','c_2')
+xlabel('R (km)')
+ylabel('T (km)')
+zlabel('N (km)')
 view([23,39])
 hold off
 %saveas(gcf,'relp_gn.png')
+matlab2tikz('3d_rtn.tikz')
 "
 
 mat"
+addpath('/Users/kevintracy/devel/GravNav/matlab2tikz-master/src')
 figure
 hold on
 subplot(1,3,1)
 hold on
 plot($rp1(1,:),$rp1(2,:))
 plot($rp2(1,:),$rp2(2,:))
-ylabel('R (km)')
-xlabel('T (km)')
-
+xlabel('R (km)')
+ylabel('T (km)')
+legend('Chaser 1','Chaser 2','location','southoutside')
 subplot(1,3,2)
 hold on
 plot($rp1(1,:),$rp1(3,:))
 plot($rp2(1,:),$rp2(3,:))
-ylabel('R (km)')
-xlabel('N (km)')
-
+xlabel('R (km)')
+ylabel('N (km)')
+legend('Chaser 1','Chaser 2','location','southoutside')
 subplot(1,3,3)
 hold on
 plot($rp1(2,:),$rp1(3,:))
 plot($rp2(2,:),$rp2(3,:))
-ylabel('T (km)')
-xlabel('N (km)')
+xlabel('T (km)')
+ylabel('N (km)')
+legend('Chaser 1','Chaser 2','location','southoutside')
+hold off
+matlab2tikz('3pane_rtn.tikz')
+"
+
+
+Ym = mat_from_vec(Y)
+
+mat"
+figure
+hold on
+plot($t_vec, $Ym(7:9,:)'*$dscale/1000)
 hold off
 "
+
+
+mat"
+figure
+hold on
+
+subplot(1,2,1)
+hold on
+grid on
+title('Relative Position from Target')
+plot3($rp1(1,:),$rp1(2,:),$rp1(3,:),'linewidth',2)
+plot3($rp2(1,:),$rp2(2,:),$rp2(3,:),'linewidth',2)
+legend('chaser 1','chaser 2')
+xlabel('R (km)')
+ylabel('T (km)')
+zlabel('N (km)')
+view([23,39])
+hold off
+
+subplot(1,2,2)
+hold on
+title('Intersatellite Ranging Measurements')
+plot($t_vec, $Ym(7:9,:)'*$dscale/1000,'linewidth',2)
+xlim([0,$t_vec(end)])
+ylim([0,6])
+xlabel('Time (house)')
+ylabel('Range (km)')
+legend('target to chaser 1','target to chaser 2','chaser 2 to chaser 3','Location','northwest')
+hold off
+
+
+%saveas(gcf,'relp_gn.png')
+matlab2tikz('twopane.tikz')
+"
+
+#12 13 23
